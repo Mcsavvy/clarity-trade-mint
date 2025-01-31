@@ -82,3 +82,50 @@ Clarinet.test({
     assertEquals(listing['status'], "completed");
   }
 });
+
+Clarinet.test({
+  name: "Test automatic offer refund on listing cancellation",
+  async fn(chain: Chain, accounts: Map<string, Account>) {
+    const deployer = accounts.get('deployer')!;
+    const buyer = accounts.get('wallet_1')!;
+    
+    // Create listing
+    let block = chain.mineBlock([
+      Tx.contractCall('trade-mint', 'create-listing', [
+        types.ascii("Test Asset"),
+        types.uint(1000)
+      ], deployer.address)
+    ]);
+    
+    const listingId = block.receipts[0].result.expectOk().expectUint();
+    
+    // Make offer
+    let offerBlock = chain.mineBlock([
+      Tx.contractCall('trade-mint', 'make-offer', [
+        types.uint(listingId)
+      ], buyer.address)
+    ]);
+    
+    offerBlock.receipts[0].result.expectOk();
+    
+    // Cancel listing
+    let cancelBlock = chain.mineBlock([
+      Tx.contractCall('trade-mint', 'cancel-listing', [
+        types.uint(listingId)
+      ], deployer.address)
+    ]);
+    
+    cancelBlock.receipts[0].result.expectOk();
+    
+    // Verify offer status
+    let getOfferBlock = chain.mineBlock([
+      Tx.contractCall('trade-mint', 'get-offer', [
+        types.uint(listingId),
+        types.principal(buyer.address)
+      ], deployer.address)
+    ]);
+    
+    const offer = getOfferBlock.receipts[0].result.expectOk().expectSome();
+    assertEquals(offer['status'], "refunded");
+  }
+});
