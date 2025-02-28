@@ -39,6 +39,19 @@
     )
 )
 
+(define-private (is-listing-active (listing-id uint))
+    (let
+        (
+            (listing (unwrap! (map-get? listings listing-id) false))
+            (current-block (get-block-height))
+        )
+        (and
+            (is-eq (get status listing) "active")
+            (< current-block (get expiry listing))
+        )
+    )
+)
+
 (define-private (refund-active-offer (listing-id uint) (buyer principal))
     (let
         (
@@ -65,7 +78,8 @@
             (listing-id (try! (increment-nonce)))
             (current-block (get-block-height))
         )
-        (asserts! (> expiry current-block) (err err-invalid-status))
+        (asserts! (> expiry current-block) err-listing-expired)
+        (asserts! (> price u0) err-invalid-status)
         (map-insert listings
             listing-id
             {
@@ -77,6 +91,43 @@
             }
         )
         (ok listing-id)
+    )
+)
+
+(define-public (make-offer (listing-id uint))
+    (let
+        (
+            (listing (unwrap! (map-get? listings listing-id) err-listing-not-found))
+            (price (get price listing))
+        )
+        (asserts! (is-listing-active listing-id) err-listing-expired)
+        (asserts! (>= (stx-get-balance tx-sender) price) err-insufficient-balance)
+        (try! (stx-transfer? price tx-sender contract-owner))
+        (map-set offers
+            {listing-id: listing-id, buyer: tx-sender}
+            {amount: price, status: "pending"}
+        )
+        (ok true)
+    )
+)
+
+(define-public (accept-offer (listing-id uint) (buyer principal))
+    (let
+        (
+            (listing (unwrap! (map-get? listings listing-id) err-listing-not-found))
+            (offer (unwrap! (map-get? offers {listing-id: listing-id, buyer: buyer}) err-no-active-offer))
+        )
+        (asserts! (is-eq (get seller listing) tx-sender) err-not-authorized)
+        (asserts! (is-listing-active listing-id) err-listing-expired)
+        (asserts! (is-eq (get status offer) "pending") err-invalid-status)
+        (map-set offers
+            {listing-id: listing-id, buyer: buyer}
+            (merge offer {status: "accepted"})
+        )
+        (map-set listings listing-id
+            (merge listing {status: "completed"})
+        )
+        (ok true)
     )
 )
 
@@ -105,6 +156,13 @@
     )
 )
 
-;; Previous functions unchanged...
-
-;; Read Only Functions unchanged...
+;; Read Only Functions
+(define-read-only (is-listing-expired (listing-id uint))
+    (let
+        (
+            (listing (unwrap! (map-get? listings listing-id) false))
+            (current-block (get-block-height))
+        )
+        (>= current-block (get expiry listing))
+    )
+)
