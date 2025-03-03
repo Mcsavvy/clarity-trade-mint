@@ -33,6 +33,10 @@ Clarinet.test({
     
     offerBlock.receipts[0].result.expectOk().expectBool(true);
     
+    // Verify escrow balance
+    const contractBalance = chain.getAssetsMaps().assets["STX"][deployer.address];
+    assertEquals(contractBalance, 1000);
+    
     // Accept offer
     let acceptBlock = chain.mineBlock([
       Tx.contractCall('trade-mint', 'accept-offer', [
@@ -45,4 +49,4 @@ Clarinet.test({
   }
 });
 
-// Previous tests unchanged...
+// Add more comprehensive tests...
