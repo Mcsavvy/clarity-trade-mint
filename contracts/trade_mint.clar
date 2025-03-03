@@ -8,6 +8,7 @@
 (define-constant err-insufficient-balance (err u103))
 (define-constant err-no-active-offer (err u104))
 (define-constant err-listing-expired (err u105))
+(define-constant err-duplicate-offer (err u106))
 
 ;; Data Variables
 (define-map listings
@@ -17,7 +18,8 @@
         asset: (string-ascii 32),
         price: uint,
         status: (string-ascii 10),
-        expiry: uint
+        expiry: uint,
+        offer-count: uint
     }
 )
 
@@ -39,6 +41,19 @@
     )
 )
 
+(define-private (is-listing-active (listing-id uint))
+    (let
+        (
+            (listing (unwrap! (map-get? listings listing-id) false))
+            (current-block (get-block-height))
+        )
+        (and
+            (is-eq (get status listing) "active")
+            (< current-block (get expiry listing))
+        )
+    )
+)
+
 (define-private (refund-active-offer (listing-id uint) (buyer principal))
     (let
         (
@@ -46,7 +61,7 @@
         )
         (if (is-eq (get status offer) "pending")
             (begin
-                (try! (stx-transfer? (get amount offer) contract-owner buyer))
+                (try! (as-contract (stx-transfer? (get amount offer) tx-sender buyer)))
                 (map-set offers
                     {listing-id: listing-id, buyer: buyer}
                     (merge offer {status: "refunded"})
@@ -65,7 +80,8 @@
             (listing-id (try! (increment-nonce)))
             (current-block (get-block-height))
         )
-        (asserts! (> expiry current-block) (err err-invalid-status))
+        (asserts! (> expiry current-block) err-listing-expired)
+        (asserts! (> price u0) err-invalid-status)
         (map-insert listings
             listing-id
             {
@@ -73,38 +89,34 @@
                 asset: asset,
                 price: price,
                 status: "active",
-                expiry: expiry
+                expiry: expiry,
+                offer-count: u0
             }
         )
         (ok listing-id)
     )
 )
 
-(define-public (cancel-listing (listing-id uint))
+(define-public (make-offer (listing-id uint))
     (let
         (
             (listing (unwrap! (map-get? listings listing-id) err-listing-not-found))
+            (price (get price listing))
+            (existing-offer (map-get? offers {listing-id: listing-id, buyer: tx-sender}))
         )
-        (asserts! (is-eq (get seller listing) tx-sender) err-not-authorized)
-        (asserts! (is-eq (get status listing) "active") err-invalid-status)
+        (asserts! (is-listing-active listing-id) err-listing-expired)
+        (asserts! (is-none existing-offer) err-duplicate-offer)
+        (asserts! (>= (stx-get-balance tx-sender) price) err-insufficient-balance)
+        (try! (stx-transfer? price tx-sender (as-contract tx-sender)))
+        (map-set offers
+            {listing-id: listing-id, buyer: tx-sender}
+            {amount: price, status: "pending"}
+        )
         (map-set listings listing-id
-            (merge listing {status: "cancelled"})
+            (merge listing {offer-count: (+ (get offer-count listing) u1)})
         )
         (ok true)
     )
 )
 
-(define-public (cancel-offer (listing-id uint))
-    (let
-        (
-            (offer (unwrap! (map-get? offers {listing-id: listing-id, buyer: tx-sender}) err-no-active-offer))
-        )
-        (asserts! (is-eq (get status offer) "pending") err-invalid-status)
-        (try! (refund-active-offer listing-id tx-sender))
-        (ok true)
-    )
-)
-
-;; Previous functions unchanged...
-
-;; Read Only Functions unchanged...
+;; ... [rest of the contract remains unchanged]
